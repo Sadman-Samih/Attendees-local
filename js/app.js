@@ -6,6 +6,9 @@ const App = {
     year: new Date().getFullYear(),
   },
 
+  demoMode: false,
+  demo: null,
+
   showStatus(message, type = 'error') {
     const el = document.getElementById('app-status');
     if (!el) return;
@@ -15,11 +18,43 @@ const App = {
     el.hidden = !text;
   },
 
+  initDemoData() {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, '0');
+    const logs = [];
+    let id = 1;
+    for (const emp of [1, 2, 3]) {
+      for (const d of [1, 2, 3, 5]) {
+        const day = String(d).padStart(2, '0');
+        logs.push({
+          id: id++,
+          employee_id: emp,
+          date: `${y}-${m}-${day}`,
+          status: 'Present',
+          created_at: new Date().toISOString(),
+        });
+      }
+    }
+    this.demo = {
+      employees: [
+        { id: 1, name: 'Alice' },
+        { id: 2, name: 'Bob' },
+        { id: 3, name: 'Carol' },
+      ],
+      logs,
+    };
+  },
+
   async init() {
     const monthSel = document.getElementById('month-select');
     const yearSel = document.getElementById('year-select');
 
-    if (typeof window.supabase === 'undefined' || !window.supabase) {
+    this.demoMode = !!window.ATTENDANCE_DEMO_MODE;
+    if (this.demoMode) {
+      this.initDemoData();
+      this.showStatus('Demo mode: showing sample data. Configure Supabase to use real data.', 'info');
+    } else if (typeof window.supabase === 'undefined' || !window.supabase) {
       this.showStatus('Supabase client failed to load. Check your connection.', 'error');
       return;
     }
@@ -47,7 +82,7 @@ const App = {
   },
 
   async renderGrid() {
-    this.showStatus('', '');
+    if (!this.demoMode) this.showStatus('', '');
     const { monthIdx, year } = this.state;
     const monthSel = document.getElementById('month-select');
     const monthName = monthSel && monthSel.options[monthIdx]
@@ -148,26 +183,46 @@ const App = {
 
     btn.disabled = true;
     try {
-      let result;
-      if (!newStatus) {
-        result = await supabase
-          .from('attendance_logs')
-          .delete()
-          .eq('employee_id', employeeId)
-          .eq('date', dateStr);
-      } else {
-        result = await supabase
-          .from('attendance_logs')
-          .upsert({
+      if (this.demoMode) {
+        const idx = this.demo.logs.findIndex(
+          (l) => l.employee_id === employeeId && l.date === dateStr
+        );
+        if (!newStatus) {
+          if (idx >= 0) this.demo.logs.splice(idx, 1);
+        } else {
+          const entry = {
+            id: Date.now(),
             employee_id: employeeId,
             date: dateStr,
             status: newStatus,
             created_at: new Date().toISOString(),
-          });
-      }
+          };
+          if (idx >= 0) this.demo.logs[idx] = entry;
+          else this.demo.logs.push(entry);
+        }
+        this.showStatus('', '');
+      } else {
+        let result;
+        if (!newStatus) {
+          result = await window.supabase
+            .from('attendance_logs')
+            .delete()
+            .eq('employee_id', employeeId)
+            .eq('date', dateStr);
+        } else {
+          result = await window.supabase
+            .from('attendance_logs')
+            .upsert({
+              employee_id: employeeId,
+              date: dateStr,
+              status: newStatus,
+              created_at: new Date().toISOString(),
+            });
+        }
 
-      if (result && result.error) throw result.error;
-      this.showStatus('', '');
+        if (result && result.error) throw result.error;
+        this.showStatus('', '');
+      }
     } catch (err) {
       console.error('toggleStatus error:', err);
       this.showStatus(
@@ -181,7 +236,12 @@ const App = {
   },
 
   async fetchEmployees() {
-    const { data, error } = await supabase
+    if (this.demoMode) {
+      return [...this.demo.employees].sort((a, b) =>
+        String(a.name).localeCompare(String(b.name))
+      );
+    }
+    const { data, error } = await window.supabase
       .from('employees')
       .select('*')
       .order('name');
@@ -190,11 +250,16 @@ const App = {
   },
 
   async fetchLogs(year, monthIdx) {
+    if (this.demoMode) {
+      const month = String(monthIdx + 1).padStart(2, '0');
+      const prefix = `${year}-${month}-`;
+      return this.demo.logs.filter((l) => String(l.date).startsWith(prefix));
+    }
     const month = String(monthIdx + 1).padStart(2, '0');
     const start = `${year}-${month}-01`;
     const end = `${year}-${month}-${new Date(year, monthIdx + 1, 0).getDate()}`;
 
-    const { data, error } = await supabase
+    const { data, error } = await window.supabase
       .from('attendance_logs')
       .select('*')
       .gte('date', start)
