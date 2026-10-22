@@ -1,4 +1,4 @@
-const CACHE = 'attendees-v2';
+const CACHE = 'attendees-v3';
 
 const STATIC = [
   '.',
